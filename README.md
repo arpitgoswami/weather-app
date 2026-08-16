@@ -1,7 +1,6 @@
-<img width="1024" height="439" alt="clear" src="https://github.com/user-attachments/assets/2e59d15a-fbdd-46de-a6cc-dafce513f253" />
+<img width="1897" height="829" alt="rain" src="https://github.com/user-attachments/assets/2cffb5a4-6204-4a07-9d88-510033e70af1" />
 
 # Weather App
-
 A simple weather dashboard built with HTML, CSS, and React (via CDN).
 
 ## Features

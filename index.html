@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Weather Dashboard</title>
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Phosphor Icons for premium icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect } = React;
+
+const App = () => {
+  const [weatherData, setWeatherData] = useState(null);
+  const [forecastData, setForecastData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [query, setQuery] = useState('Paonta Sahib');
+  const [cityDisplay, setCityDisplay] = useState('Paonta Sahib');
+  const [activeTab, setActiveTab] = useState('Today'); // 'Today', 'Tomorrow', 'Next 7 Days'
+  const [bgImage, setBgImage] = useState('images/clear.jpg');
+
+  const getWeatherInfo = (code) => {
+    if (code === 0 || code === 1) return { text: 'Clear', type: 'sun', icon: 'ph-sun' };
+    if ([2, 3].includes(code)) return { text: 'Cloudy', type: 'cloud', icon: 'ph-cloud' };
+    if ([45, 48].includes(code)) return { text: 'Fog', type: 'cloud', icon: 'ph-cloud-fog' };
+    if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) return { text: 'Rain', type: 'rain', icon: 'ph-cloud-rain' };
+    if ([71, 73, 75, 85, 86].includes(code)) return { text: 'Snow', type: 'snow', icon: 'ph-cloud-snow' };
+    if ([95, 96, 99].includes(code)) return { text: 'Storm', type: 'lightning', icon: 'ph-cloud-lightning' };
+    return { text: 'Clear', type: 'sun', icon: 'ph-sun' };
+  };
+
+  const getBackgroundImage = (text) => {
+    switch (text) {
+      case 'Clear': return 'images/clear.jpg';
+      case 'Cloudy': return 'images/cloudy.jpg';
+      case 'Fog': return 'images/cloudy.jpg';
+      case 'Rain': return 'images/rain.jpg';
+      case 'Snow': return 'images/snow.jpg';
+      case 'Storm': return 'images/rain.jpg';
+      default: return 'images/clear.jpg';
+    }
+  };
+
+  const formatMainDate = () => {
+    const d = new Date();
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = d.toLocaleString('en-US', { month: 'long' });
+    const year = d.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
+
+  const formatHour = (dateString) => {
+    const d = new Date(dateString);
+    let hours = d.getHours();
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return `${hours} ${ampm}`;
+  };
+
+  const formatDay = (dateString) => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const d = new Date(dateString);
+    return days[d.getDay()];
+  };
+
+  const fetchWeather = async (searchCity) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchCity)}&count=1`);
+      const geoData = await geoRes.json();
+      
+      if (!geoData.results || geoData.results.length === 0) {
+        throw new Error('City not found');
+      }
+      
+      const { latitude, longitude, name } = geoData.results[0];
+      setCityDisplay(name);
+
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,cloud_cover,surface_pressure&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max&timezone=auto`;
+      const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${latitude}&longitude=${longitude}&current=european_aqi&timezone=auto`;
+      
+      const [weatherRes, aqiRes] = await Promise.all([
+        fetch(weatherUrl),
+        fetch(aqiUrl).catch(() => null)
+      ]);
+      
+      const data = await weatherRes.json();
+      let aqiValue = '--';
+      if (aqiRes && aqiRes.ok) {
+        const aqiData = await aqiRes.json();
+        if (aqiData.current && aqiData.current.european_aqi !== undefined) {
+          aqiValue = aqiData.current.european_aqi;
+        }
+      }
+      
+      const weatherInfo = getWeatherInfo(data.current.weather_code);
+      setWeatherData({ ...data.current, info: weatherInfo, aqi: aqiValue });
+      setBgImage(getBackgroundImage(weatherInfo.text));
+
+      const now = new Date();
+      
+      const fullHourly = data.hourly.time.map((t, i) => ({
+        time: t,
+        temp: data.hourly.temperature_2m[i],
+        code: data.hourly.weather_code[i],
+        precipProb: data.hourly.precipitation_probability[i] || 0
+      }));
+
+      // Parse current day and tomorrow
+      const todayDateStr = now.toDateString();
+      const tomorrowDateStr = new Date(now.getTime() + 86400000).toDateString();
+
+      const todayHourly = fullHourly.filter(h => new Date(h.time).toDateString() === todayDateStr && new Date(h.time) >= now).slice(0, 24);
+      const tomorrowHourly = fullHourly.filter(h => new Date(h.time).toDateString() === tomorrowDateStr).slice(0, 24);
+
+      // Daily data
+      const daily = data.daily.time.map((time, index) => ({
+        time: time,
+        code: data.daily.weather_code[index],
+        tempMax: data.daily.temperature_2m_max[index],
+        tempMin: data.daily.temperature_2m_min[index],
+        precipProb: data.daily.precipitation_probability_max[index] || 0,
+        uvIndex: data.daily.uv_index_max[index] || 0
+      }));
+
+      setForecastData({ todayHourly, tomorrowHourly, daily });
+      
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchWeather(query);
+  }, []);
+
+  const handleSearch = (e) => {
+    if (e.key === 'Enter' && query.trim() !== '') {
+      fetchWeather(query);
+    }
+  };
+
+  return (
+    <div className="app-container">
+      <div className="search-container">
+        <i className="ph ph-magnifying-glass search-icon"></i>
+        <input 
+          type="text" 
+          className="search-input" 
+          placeholder="Search city..." 
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleSearch}
+          disabled={loading}
+        />
+      </div>
+
+      {loading && (
+        <div className="loading-state">
+          <div className="spinner"></div>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div className="error-state">
+          <p>{error}</p>
+          <button onClick={() => fetchWeather('Paonta Sahib')} style={{ marginTop: 16, padding: '8px 16px', borderRadius: 12, border: 'none', background: 'var(--card-bg)', color: 'white' }}>Reset</button>
+        </div>
+      )}
+
+      {!loading && !error && weatherData && forecastData && (
+        <>
+          {/* Hero Banner Image */}
+          <div 
+             className="hero-banner" 
+             style={{ backgroundImage: `url(${bgImage})` }}
+          ></div>
+
+          {/* Main Weather Card */}
+          <div className="main-card">
+            <div className="main-info">
+              <div className="main-date">{formatMainDate()}</div>
+              <div className="main-condition">{weatherData.info.text}</div>
+              <div className="main-temp">
+                {Math.round(weatherData.temperature_2m)}°C
+              </div>
+            </div>
+            <div className="main-icon">
+              <i className={`ph-fill ${weatherData.info.icon} icon-${weatherData.info.type}`}></i>
+            </div>
+          </div>
+
+          {/* Metrics Card */}
+          <div className="metrics-card">
+            <div className="metric-col">
+              <i className="ph ph-wind metric-icon"></i>
+              <div className="metric-val">{Math.round(weatherData.wind_speed_10m)} m/s</div>
+              <div className="metric-label">Wind</div>
+            </div>
+            <div className="metric-col">
+              <i className="ph ph-drop metric-icon"></i>
+              <div className="metric-val">{weatherData.relative_humidity_2m}%</div>
+              <div className="metric-label">Humidity</div>
+            </div>
+            <div className="metric-col">
+              <i className="ph ph-cloud-rain metric-icon" style={{color: 'var(--color-rain)'}}></i>
+              <div className="metric-val" style={{color: 'var(--color-rain)'}}>{weatherData.precipitation > 0 ? weatherData.precipitation + 'mm' : '0%'}</div>
+              <div className="metric-label">Rain</div>
+            </div>
+            <div className="metric-col">
+              <i className="ph ph-leaf metric-icon"></i>
+              <div className="metric-val">{weatherData.aqi}</div>
+              <div className="metric-label">AQI</div>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="tabs">
+            {['Today', 'Tomorrow', 'Next 7 Days'].map(tab => (
+              <div 
+                key={tab} 
+                className={`tab ${activeTab === tab ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab}
+              </div>
+            ))}
+          </div>
+
+          {/* Tab Content */}
+          {activeTab === 'Today' && (
+            <div className="hourly-row">
+              {forecastData.todayHourly.map((hour, idx) => (
+                <div className="hourly-card" key={idx}>
+                  <div className="hourly-time">{idx === 0 ? 'Now' : formatHour(hour.time)}</div>
+                  <i className={`ph ${getWeatherInfo(hour.code).icon} hourly-icon`}></i>
+                  {hour.precipProb > 0 && <div className="hourly-precip">{hour.precipProb}%</div>}
+                  <div className="hourly-temp">{Math.round(hour.temp)}°</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'Tomorrow' && (
+            <div className="hourly-row">
+              {forecastData.tomorrowHourly.map((hour, idx) => (
+                <div className="hourly-card" key={idx}>
+                  <div className="hourly-time">{formatHour(hour.time)}</div>
+                  <i className={`ph ${getWeatherInfo(hour.code).icon} hourly-icon`}></i>
+                  {hour.precipProb > 0 && <div className="hourly-precip">{hour.precipProb}%</div>}
+                  <div className="hourly-temp">{Math.round(hour.temp)}°</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'Next 7 Days' && (
+            <div className="hourly-row">
+              {forecastData.daily.slice(1, 8).map((day, idx) => (
+                <div className="hourly-card" key={idx}>
+                  <div className="hourly-time">{formatDay(day.time)}</div>
+                  <i className={`ph-fill ${getWeatherInfo(day.code).icon} hourly-icon icon-${getWeatherInfo(day.code).type}`}></i>
+                  {day.precipProb > 0 && <div className="hourly-precip">{day.precipProb}%</div>}
+                  <div className="hourly-temp">
+                    {Math.round(day.tempMax)}° <span style={{color: 'var(--text-secondary)', fontSize: '12px'}}>{Math.round(day.tempMin)}°</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Extra Details instead of Chart */}
+          <div className="extra-details-grid">
+            <div className="detail-box">
+              <i className="ph ph-thermometer"></i>
+              <div className="detail-info">
+                <span className="detail-label">Feels Like</span>
+                <span className="detail-val">{Math.round(weatherData.apparent_temperature)}°C</span>
+              </div>
+            </div>
+            <div className="detail-box">
+              <i className="ph ph-cloud"></i>
+              <div className="detail-info">
+                <span className="detail-label">Cloud Cover</span>
+                <span className="detail-val">{weatherData.cloud_cover}%</span>
+              </div>
+            </div>
+            <div className="detail-box">
+              <i className="ph ph-gauge"></i>
+              <div className="detail-info">
+                <span className="detail-label">Pressure</span>
+                <span className="detail-val">{Math.round(weatherData.surface_pressure)} hPa</span>
+              </div>
+            </div>
+            <div className="detail-box">
+              <i className="ph ph-sun"></i>
+              <div className="detail-info">
+                <span className="detail-label">UV Index</span>
+                <span className="detail-val">{forecastData.daily[0]?.uvIndex || 0}</span>
+              </div>
+            </div>
+          </div>
+
+        </>
+      )}
+    </div>
+  );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  </script>
+</body>
+</html>
